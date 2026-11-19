@@ -2253,7 +2253,7 @@ function initHighlight() {
 
 function updateHighlight() {
   if (!HL_EDGES) return;
-  const id = STATE.hovered || STATE.selected;
+  const id = STATE.mode === 'anatomy' ? (STATE.selected || STATE.hovered) : (STATE.hovered || STATE.selected);
   if (!id || !S_PARTS[id]) { HL_EDGES.visible = false; return; }
   const s = S_PARTS[id];
   _box.setFromObject(s.group);
@@ -2274,6 +2274,8 @@ const _ndc = new THREE.Vector2();
 const TWEENS = [];
 
 function tween(dur, onUpdate, onDone) {
+  // Camera moves replace earlier camera moves, so rapid selections cannot fight.
+  TWEENS.length = 0;
   TWEENS.push({ t0: performance.now(), dur: dur, onUpdate: onUpdate, onDone: onDone });
 }
 function stepTweens(now) {
@@ -2289,8 +2291,8 @@ function stepTweens(now) {
 }
 
 function selectPart(id) {
-  if (STATE.selected === id) return;
-  commit({ selected: id });
+  if (STATE.selected !== id) commit({ selected: id });
+  if (id && STATE.mode === 'anatomy') focusPart(id);
 }
 
 // Only the current step's working components participate in raycasting in module 03.
@@ -2377,11 +2379,13 @@ function focusPart(id) {
   const box = new THREE.Box3().setFromObject(s.group);
   if (box.isEmpty()) return;
   const sph = box.getBoundingSphere(new THREE.Sphere());
-  const dist = (sph.radius / Math.sin(THREE.MathUtils.degToRad(S_CAM.fov / 2))) * 2.05 + 3.4;
+  const verticalHalfFov = THREE.MathUtils.degToRad(S_CAM.fov / 2);
+  const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * S_CAM.aspect);
+  const dist = sph.radius / Math.sin(Math.min(verticalHalfFov, horizontalHalfFov)) * 2.05 + 3.4;
   const dirv = S_ACTIVE_CAM.position.clone().sub(S_CTRL.target);
   if (dirv.lengthSq() < 1e-6) dirv.set(1, 1, 1);
   dirv.normalize();
-  const goal = sph.center.clone().addScaledVector(dirv, clamp(dist, 3.2, 70));
+  const goal = sph.center.clone().addScaledVector(dirv, clamp(dist, S_CTRL.minDistance, 70));
   const p0 = S_ACTIVE_CAM.position.clone();
   const t0 = S_CTRL.target.clone();
   S_CTRL.enabled = false;
@@ -4049,7 +4053,7 @@ function bindUI() {
       return;
     }
     const item = e.target.closest('.item');
-    if (item) { selectPart(item.dataset.id); focusPart(item.dataset.id); return; }
+    if (item) { selectPart(item.dataset.id); return; }
     const exp = e.target.closest('.exp');
     if (exp && exp.dataset.sc !== STATE.scenario) commit({ scenario: exp.dataset.sc });
   });
